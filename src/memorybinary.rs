@@ -24,11 +24,11 @@ impl MemoryBinary {
         Ok(Self { binary, file, fd_path })
     }
 
-    pub fn run(&self, app: &str, args: &[&str]) -> std::io::Result<std::process::Output> {
-        Command::new(&self.fd_path)
+    pub fn run(&self, app: &str, args: &[&str]) -> anyhow::Result<std::process::Output> {
+        Ok(Command::new(&self.fd_path)
             .arg(app)
             .args(args)
-            .output()
+            .output()?)
     }
 
     pub fn run_with_stdin(&self, app: &str, args: &[&str], stdin: &[u8]) -> anyhow::Result<std::process::Output> {
