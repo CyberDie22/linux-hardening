@@ -1,6 +1,7 @@
 #![feature(once_cell_try)]
 
 use std::collections::HashMap;
+use std::fs;
 use crate::files::PrintName;
 use crate::packages::{verify_package, Package};
 use owo_colors::OwoColorize;
@@ -44,6 +45,25 @@ macro_rules! print_error {
     }
 }
 
+enum OperatingSystem {
+    Ubuntu,
+    Rocky,
+    Other,
+}
+
+impl OperatingSystem {
+    fn get() -> OperatingSystem {
+        if let Ok(release) = fs::read_to_string("/etc/os-release") {
+            if release.contains("ID=ubuntu") {
+                return OperatingSystem::Ubuntu
+            } else if release.contains("ID=\"rocky\"") {
+                return OperatingSystem::Rocky
+            }
+        }
+        OperatingSystem::Other
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     // TODO: output to log file
     // TODO: Disable networking
@@ -65,26 +85,44 @@ fn main() -> anyhow::Result<()> {
     print_error!(files::print_directory("/etc/init.d", vec![]), "Failed to print /etc/init.d");
 
     println!("\nPackages:");
-    match packages::get_packages() {
-        Ok(packages) => {
-            for package in packages { // TODO: write this to a file
-                let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
-                let (failed_files, missed_files) = verify_package(&package)?.unwrap_or((vec![], vec![]));
-                let message = format!(" {} failed, {} missed", failed_files.len(), missed_files.len());
-                if failed_files.is_empty() {
-                    println!("{}", message.green());
-                } else {
-                    println!("{}", message.red());
+    let operating_system = OperatingSystem::get();
+
+    match operating_system {
+        OperatingSystem::Ubuntu => {
+            match packages::get_packages() {
+                Ok(packages) => {
+                    for package in packages { // TODO: write this to a file
+                        let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
+                        let (failed_files, missed_files) = verify_package(&package)?.unwrap_or((vec![], vec![]));
+                        let message = format!(" {} failed, {} missed", failed_files.len(), missed_files.len());
+                        if failed_files.is_empty() {
+                            println!("{}", message.green());
+                        } else {
+                            println!("{}", message.red());
+                        }
+                        for file in failed_files {
+                            println!("  {}: FAILED", file);
+                        }
+                    }
                 }
-                for file in failed_files {
-                    println!("  {}: FAILED", file);
+                Err(e) => {
+                    eprintln!("Failed to get packages: {:#}", e);
                 }
             }
         }
-        Err(e) => {
-            eprintln!("Failed to get packages: {:#}", e);
+
+        OperatingSystem::Rocky => {
+            match shellscript::run_script("rpm", "rpm -Va", &[]) {
+                Ok(_) => println!("RPM verification completed successfully"),
+                Err(e) => eprintln!("Failed to run rpm -Va: {:#}", e),
+            }
+        }
+
+        OperatingSystem::Other => {
+            println!("Unsupported operating system");
         }
     }
+
 
     // TODO: verify packages
     // TODO: support rpms
