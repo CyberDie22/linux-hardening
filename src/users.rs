@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, Context};
 use inquire::Select;
 use owo_colors::OwoColorize;
-use crate::busybox::{busybox, busybox_with_stdin};
+use crate::busybox::{busybox, busybox_with_stdin, usermod};
 
 #[derive(Debug)]
 struct User {
@@ -62,87 +62,46 @@ fn get_users() -> anyhow::Result<Vec<User>> {
     Ok(users)
 }
 
-const NONINTERACTIVE_SHELLS: [&str; 4] = ["/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false"];
-
-const MANAGE_USER_OPTIONS: [&str; 3] = ["Make non-interactive", "Delete", "Ignore"];
-const MANAGE_SUDO_OPTIONS: [&str; 2] = ["Leave in sudo", "Remove from sudo"];
-
-fn handle_interactive_user(user: &mut User) -> anyhow::Result<()> {
-    println!("{}", format!("User `{}` is possibly interactive ({})", user.name, user.shell).red());
-    let answer = Select::new("Choose an option: ", MANAGE_USER_OPTIONS.to_vec()).prompt().context("Failed to get user selection")?;
-    match answer {
-        "Make non-interactive" => {
-            user.shell = "/sbin/nologin".to_string();
-            println!("Run usermod --shell /sbin/nologin {}", user.name); // TODO
-        },
-        "Delete" => {
-            user.deleted = true;
-            busybox("deluser", &["--remove-home", &*user.name]).context("Failed to delete user")?;
-        },
-        "Ignore" => {
-            busybox_with_stdin("chpasswd", &["-c", "sha512"], format!("{}:Password", user.name).as_bytes()).context("Failed to set password for user")?;
-        }
-        _ => ()
-    }
-    Ok(())
-}
-
-fn handle_noninteractive_user(user: &mut User) -> anyhow::Result<()> {
-    user.is_locked = true;
-    busybox("passwd", &["-l", &*user.name]).context("Failed to lock user")?;
-    Ok(())
-}
-
-fn handle_admin_user(user: &mut User) -> anyhow::Result<()> {
-    println!("{}", format!("User `{}` is in sudo group", user.name).red());
-    let answer = Select::new("Choose an option: ", MANAGE_SUDO_OPTIONS.to_vec()).prompt().context("Failed to get user selection")?;
-    match answer {
-        "Leave in sudo" => (),
-        "Remove from sudo" => {
-            user.groups.retain(|group| group != &"sudo".to_string());
-            busybox("delgroup", &[&*user.name, "sudo"]).context("Failed to remove user from sudo group")?;
-        },
-        _ => ()
-    }
-    Ok(())
-}
-
+// const NONINTERACTIVE_SHELLS: [&str; 4] = ["/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false"];
 
 fn make_noninteractive(user: &mut User) -> anyhow::Result<()> {
     print!("Making non-interactive");
-
+    user.is_locked = true;
+    busybox("passwd", &["-l", &*user.name]).context("Failed to lock user")?;
+    usermod(&["-s", "/sbin/nologin", &*user.name]).context("Failed to set shell to /sbin/nologin")?;
+    Ok(())
 }
 
 pub fn users() -> anyhow::Result<()> {
     let mut users = get_users()?;
 
-    let allowed_users = fs::read_to_string("users.txt")?.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
-    let allowed_admins = fs::read_to_string("admins.txt")?.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let users_txt = fs::read_to_string("users.txt")?;
+    let allowed_users = users_txt.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let admins_txt = fs::read_to_string("admins.txt")?;
+    let allowed_admins = admins_txt.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
 
     for user in &mut users {
-        print!("\n{} {}", "User:".yellow(), user.name);
+        print!("{} {}", "User:".yellow(), user.name);
 
-        if (user.uid < 1000) {
-            handle_
+        if user.uid < 1000 {
+            make_noninteractive(user)?;
         }
 
-        if !NONINTERACTIVE_SHELLS.contains(&user.shell.as_str()) {
-            handle_interactive_user(user)?;
-            if user.deleted { continue };
+        if user.groups.contains(&"sudo".to_string()) && !allowed_admins.contains(&user.name.as_str()) {
+            user.groups.retain(|group| group != &"sudo".to_string());
+            busybox("delgroup", &[&*user.name, "sudo"]).context("Failed to remove user from sudo group")?;
         }
 
-        if NONINTERACTIVE_SHELLS.contains(&user.shell.as_str()) && !user.is_locked {
-            handle_noninteractive_user(user)?;
-        }
-
-        if user.groups.contains(&"sudo".to_string()) {
-            handle_admin_user(user)?;
+        if !allowed_users.contains(&user.name.as_str()) {
+            print!(" - {}", "Not allowed".red());
+            continue;
         }
 
         let home_directory = Path::new(&user.home_directory);
         if home_directory.exists() {
             crate::files::print_directory(&home_directory.join(".ssh"), vec!["authorized_keys", "environment", "rc"])?;
         }
+        println!();
     }
     Ok(())
 }

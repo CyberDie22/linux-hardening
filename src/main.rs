@@ -36,41 +36,53 @@ const LINPEAS_SH: &'static str = include_str!("../tools/linpeas.sh");
 const LYNIS_TAR: &'static [u8] = include_bytes!("../tools/lynis-3.1.6.tar.gz");
 const LOKIRS_TAR: &'static [u8] = include_bytes!("../tools/Loki-RS/build/loki-rs.tar.gz");
 
+macro_rules! print_error {
+    ($attempt:expr, $message:expr) => {
+        if let Err(e) = $attempt {
+            eprintln!("{}: {:#}", $message, e);
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     // TODO: output to log file
     // TODO: Disable networking
-    // TODO: Backup entire system
 
-    // TODO: automate based on good user list
-    users::users()?;
+    print_error!(users::users(), "Failed to get users");
 
-    // files::print_file("/etc/sudoers", PrintName::Full, 0, true)?;
-    // files::print_directory("/etc/sudoers.d", vec![])?;
-    //
-    // files::print_directory("/var/spool/cron/crontabs", vec![])?;
-    // files::print_file("/etc/crontab", PrintName::Full, 0, true)?;
-    // files::print_directory("/etc/cron.hourly", vec![])?;
-    // files::print_directory("/etc/cron.daily", vec![])?;
-    // files::print_directory("/etc/cron.weekly", vec![])?;
-    // files::print_directory("/etc/cron.monthly", vec![])?;
-    // files::print_directory("/etc/cron.d", vec![])?;
-    // files::print_file("/etc/anacrontab", PrintName::Full, 0, true)?;
+    print_error!(files::print_file("/etc/sudoers", PrintName::Full, 0, true), "Failed to print /etc/sudoers");
+    print_error!(files::print_directory("/etc/sudoers.d", vec![]), "Failed to print /etc/sudoers.d");
 
-    // files::print_directory("/etc/init.d", vec![])?;
+    print_error!(files::print_directory("/var/spool/cron/crontabs", vec![]), "Failed to print /var/spool/cron/crontabs");
+    print_error!(files::print_file("/etc/crontab", PrintName::Full, 0, true), "Failed to print /etc/crontab");
+    print_error!(files::print_directory("/etc/cron.hourly", vec![]), "Failed to print /etc/cron.hourly");
+    print_error!(files::print_directory("/etc/cron.daily", vec![]), "Failed to print /etc/cron.daily");
+    print_error!(files::print_directory("/etc/cron.weekly", vec![]), "Failed to print /etc/cron.weekly");
+    print_error!(files::print_directory("/etc/cron.monthly", vec![]), "Failed to print /etc/cron.monthly");
+    print_error!(files::print_directory("/etc/cron.d", vec![]), "Failed to print /etc/cron.d");
+    print_error!(files::print_file("/etc/anacrontab", PrintName::Full, 0, true), "Failed to print /etc/anacrontab");
+
+    print_error!(files::print_directory("/etc/init.d", vec![]), "Failed to print /etc/init.d");
 
     println!("\nPackages:");
-    let packages = packages::get_packages()?;
-    for package in packages { // TODO: write this to a file
-        let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
-        let (failed_files, missed_files) = verify_package(&package)?.unwrap_or((vec![], vec![]));
-        let message = format!(" {} failed, {} missed", failed_files.len(), missed_files.len());
-        if failed_files.is_empty() {
-            println!("{}", message.green());
-        } else {
-            println!("{}", message.red());
+    match packages::get_packages() {
+        Ok(packages) => {
+            for package in packages { // TODO: write this to a file
+                let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
+                let (failed_files, missed_files) = verify_package(&package)?.unwrap_or((vec![], vec![]));
+                let message = format!(" {} failed, {} missed", failed_files.len(), missed_files.len());
+                if failed_files.is_empty() {
+                    println!("{}", message.green());
+                } else {
+                    println!("{}", message.red());
+                }
+                for file in failed_files {
+                    println!("  {}: FAILED", file);
+                }
+            }
         }
-        for file in failed_files {
-            println!("  {}: FAILED", file);
+        Err(e) => {
+            eprintln!("Failed to get packages: {:#}", e);
         }
     }
 
@@ -79,18 +91,18 @@ fn main() -> anyhow::Result<()> {
 
     // TODO: important file permissions
 
-    // processes::check()?;
+    print_error!(processes::check(), "Failed to check processes");
 
-    // networking::network_connections()?;
+    print_error!(networking::network_connections(), "Failed to get network connections");
 
     // TODO: check installed packages
 
     // TODO: configure firewall
 
-    shellscript::run_script("linpeas.sh", LINPEAS_SH, &[])?;
-    shellscript::run_script_tar("lynis", "lynis/lynis", LYNIS_TAR, &["audit", "system"], true)?;
+    print_error!(shellscript::run_script("linpeas.sh", LINPEAS_SH, &[]), "Failed to run linpeas.sh");
+    print_error!(shellscript::run_script_tar("lynis", "lynis/lynis", LYNIS_TAR, &["audit", "system"], true), "Failed to run lynis");
 
-    // shellscript::run_script_tar("loki", "loki", LOKIRS_TAR, &[], false)?;  // TODO: not sure about this
+    // print_error!(shellscript::run_script_tar("loki", "loki", LOKIRS_TAR, &[], false), "Failed to run loki"); // TODO: not sure about this
 
     // TODO: STIG scripts https://www.cyber.mil/stigs/downloads/
     // TODO: Maldetect + ClamAV https://docs.clamav.net/ https://www.rfxn.com/projects/linux-malware-detect/
