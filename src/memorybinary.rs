@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::process::{Command, Stdio};
+use anyhow::Context;
 
 pub struct MemoryBinary {
     binary: &'static [u8],
@@ -11,11 +12,11 @@ pub struct MemoryBinary {
 }
 
 impl MemoryBinary {
-    pub fn new(name: &str, binary: &'static [u8]) -> std::io::Result<Self> {
-        let name = CString::new(name).unwrap();
+    pub fn new(name: &str, binary: &'static [u8]) -> anyhow::Result<Self> {
+        let name = CString::new(name)?;
         let fd = unsafe { libc::memfd_create(name.as_ptr(), 0) };
         if fd < 0 {
-            return Err(std::io::Error::last_os_error())
+            return Err(std::io::Error::last_os_error().into());
         }
         let mut file = unsafe { File::from_raw_fd(fd) };
         file.write_all(binary)?;
@@ -30,7 +31,7 @@ impl MemoryBinary {
             .output()
     }
 
-    pub fn run_with_stdin(&self, app: &str, args: &[&str], stdin: &[u8]) -> std::io::Result<std::process::Output> {
+    pub fn run_with_stdin(&self, app: &str, args: &[&str], stdin: &[u8]) -> anyhow::Result<std::process::Output> {
         let mut child = Command::new(&self.fd_path)
             .arg(app)
             .args(args)
@@ -38,8 +39,8 @@ impl MemoryBinary {
             .stdout(Stdio::piped())
             .spawn()?;
 
-        child.stdin.take().unwrap().write_all(stdin)?;
+        child.stdin.take().context("Failed to open stdin pipe")?.write_all(stdin)?;
 
-        child.wait_with_output()
+        Ok(child.wait_with_output()?)
     }
 }

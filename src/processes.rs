@@ -1,57 +1,68 @@
+use anyhow::Context;
 use owo_colors::OwoColorize;
 use procfs::process::{MMapPath, Process};
 
-fn check_scripts() {
+fn check_scripts() -> anyhow::Result<()> {
     println!();
     let mut potential_scripts = Vec::new();
 
-    for process in procfs::process::all_processes().unwrap() {
-        let process = process.unwrap();
+    for process in procfs::process::all_processes().context("Failed to enumerate processes")? {
+        let process = process?;
         let process_exe = process.exe();
         if let Ok(process_exe) = process_exe {
-            let name = process_exe.file_name().unwrap().to_str().unwrap();
-            if name.contains("python") {
-                potential_scripts.push(process);
-                continue;
-            } else if name.contains("bash") {
-                potential_scripts.push(process);
-                continue;
+            if let Some(name) = process_exe.file_name().and_then(|n| n.to_str()) {
+                if name.contains("python") {
+                    potential_scripts.push(process);
+                    continue;
+                } else if name.contains("bash") {
+                    potential_scripts.push(process);
+                    continue;
+                }
             }
         }
 
-        let process_maps = process.maps().unwrap();
-        if process_maps.iter().any(|map| {
-            if let MMapPath::Path(path) = map.pathname.clone() {
-                path.to_str().unwrap().contains("python")
-            } else {
-                false
+        if let Ok(process_maps) = process.maps() {
+            if process_maps.iter().any(|map| {
+                if let MMapPath::Path(path) = &map.pathname {
+                    path.to_str().unwrap_or("").contains("python")
+                } else {
+                    false
+                }
+            }) {
+                potential_scripts.push(process);
+                continue;
             }
-        }) {
-            potential_scripts.push(process);
-            continue;
         }
     }
 
     for process in potential_scripts {
         println!("{}", "Found potential script process:".red());
         println!("  PID: {}", process.pid);
-        println!("  Command: {}", process.cmdline().unwrap().join(" "));
+        if let Ok(cmdline) = process.cmdline() {
+            println!("  Command: {}", cmdline.join(" "));
+        }
 
-        let parent_id = process.stat().unwrap().ppid;
-        let mut possible_parent = Process::new(parent_id);
-        loop {
-            if let Ok(parent) = possible_parent {
-                let parent_id = parent.stat().unwrap().ppid;
-                possible_parent = Process::new(parent_id);
-                println!("  Parent: {} - {}", parent.pid, parent.cmdline().unwrap().join(" "));
-            } else {
-                break
+        if let Ok(stat) = process.stat() {
+            let mut possible_parent = Process::new(stat.ppid);
+            loop {
+                if let Ok(parent) = possible_parent {
+                    if let Ok(parent_stat) = parent.stat() {
+                        possible_parent = Process::new(parent_stat.ppid);
+                        let cmd = parent.cmdline().unwrap_or_default().join(" ");
+                        println!("  Parent: {} - {}", parent.pid, cmd);
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
             }
         }
     }
     println!();
+    Ok(())
 }
 
-pub fn check() {
-    check_scripts();
+pub fn check() -> anyhow::Result<()> {
+    check_scripts()
 }

@@ -3,7 +3,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-pub fn run_script(name: &str, script: &str, args: &[&str]) -> std::io::Result<()> {
+pub fn run_script(name: &str, script: &str, args: &[&str]) -> anyhow::Result<()> {
     let file_path = format!("/tmp/{}", name);
     let mut file = File::create(&file_path)?;
     file.write_all(script.as_bytes())?;
@@ -20,7 +20,7 @@ pub fn run_script(name: &str, script: &str, args: &[&str]) -> std::io::Result<()
     Ok(())
 }
 
-pub fn run_script_tar(tar_name: &str, script_name: &str, tar_data: &[u8], args: &[&str], is_bash: bool) -> std::io::Result<()> {
+pub fn run_script_tar(tar_name: &str, script_name: &str, tar_data: &[u8], args: &[&str], is_bash: bool) -> anyhow::Result<()> {
     let tar_directory_path = format!("/tmp/{}", tar_name);
     let tar_file_path = format!("{}/{}.tar", tar_directory_path, tar_name);
     std::fs::create_dir_all(format!("{}", &tar_directory_path))?;

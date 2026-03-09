@@ -1,6 +1,8 @@
+use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
+use anyhow::Context;
 use inquire::Select;
 use owo_colors::OwoColorize;
 use crate::busybox::{busybox, busybox_with_stdin};
@@ -16,15 +18,15 @@ struct User {
     deleted: bool,
 }
 
-fn get_users() -> Vec<User> {
-    let passwd = File::open("/etc/passwd").unwrap();
-    let user_lines = BufReader::new(passwd).lines().map(|line| line.unwrap());
+fn get_users() -> anyhow::Result<Vec<User>> {
+    let passwd = File::open("/etc/passwd").context("Failed to open /etc/passwd")?;
     let mut users = Vec::new();
-    for line in user_lines {
+    for line in BufReader::new(passwd).lines() {
+        let line = line.context("Failed to read line from /etc/passwd")?;
         let parts: Vec<&str> = line.split(':').collect();
         let user = User {
             name: parts[0].to_string(),
-            uid: parts[2].parse().unwrap(),
+            uid: parts[2].parse().context("Failed to parse UID")?,
             home_directory: parts[5].to_string(),
             shell: parts[6].to_string(),
             is_locked: false,
@@ -35,26 +37,28 @@ fn get_users() -> Vec<User> {
         users.push(user);
     }
 
-    let shadow = File::open("/etc/shadow").unwrap();
-    let shadow_lines = BufReader::new(shadow).lines().map(|line| line.unwrap());
-    for line in shadow_lines {
+    let shadow = File::open("/etc/shadow").context("Failed to open /etc/shadow")?;
+    for line in BufReader::new(shadow).lines() {
+        let line = line.context("Failed to read line from /etc/shadow")?;
         let parts: Vec<&str> = line.split(':').collect();
         if parts[0] == "root" { continue };
-        let user = users.iter_mut().find(|user| user.name == parts[0]).unwrap();
-        user.is_locked = parts[1].starts_with('*') || parts[1].starts_with('!');
-    }
-
-    let groups = File::open("/etc/group").unwrap();
-    let group_lines = BufReader::new(groups).lines().map(|line| line.unwrap());
-
-    for line in group_lines {
-        let parts: Vec<&str> = line.split(':').collect();
-        for username in parts[3].split(',').filter(|s| !s.is_empty()) {
-            users.iter_mut().find(|user| user.name == username.to_string()).unwrap().groups.push(parts[0].to_string());
+        if let Some(user) = users.iter_mut().find(|user| user.name == parts[0]) {
+            user.is_locked = parts[1].starts_with('*') || parts[1].starts_with('!');
         }
     }
 
-    users
+    let groups = File::open("/etc/group").context("Failed to open /etc/group")?;
+    for line in BufReader::new(groups).lines() {
+        let line = line.context("Failed to read line from /etc/group")?;
+        let parts: Vec<&str> = line.split(':').collect();
+        for username in parts[3].split(',').filter(|s| !s.is_empty()) {
+            if let Some(user) = users.iter_mut().find(|user| user.name == username) {
+                user.groups.push(parts[0].to_string());
+            }
+        }
+    }
+
+    Ok(users)
 }
 
 const NONINTERACTIVE_SHELLS: [&str; 4] = ["/sbin/nologin", "/usr/sbin/nologin", "/bin/false", "/usr/bin/false"];
@@ -62,9 +66,9 @@ const NONINTERACTIVE_SHELLS: [&str; 4] = ["/sbin/nologin", "/usr/sbin/nologin", 
 const MANAGE_USER_OPTIONS: [&str; 3] = ["Make non-interactive", "Delete", "Ignore"];
 const MANAGE_SUDO_OPTIONS: [&str; 2] = ["Leave in sudo", "Remove from sudo"];
 
-fn handle_interactive_user(user: &mut User) {
+fn handle_interactive_user(user: &mut User) -> anyhow::Result<()> {
     println!("{}", format!("User `{}` is possibly interactive ({})", user.name, user.shell).red());
-    let answer = Select::new("Choose an option: ", MANAGE_USER_OPTIONS.to_vec()).prompt().unwrap();
+    let answer = Select::new("Choose an option: ", MANAGE_USER_OPTIONS.to_vec()).prompt().context("Failed to get user selection")?;
     match answer {
         "Make non-interactive" => {
             user.shell = "/sbin/nologin".to_string();
@@ -72,54 +76,72 @@ fn handle_interactive_user(user: &mut User) {
         },
         "Delete" => {
             user.deleted = true;
-            busybox("deluser", &["--remove-home", &*user.name]).expect("Failed to delete user");
+            busybox("deluser", &["--remove-home", &*user.name]).context("Failed to delete user")?;
         },
         "Ignore" => {
-            busybox_with_stdin("chpasswd", &["-c", "sha512"], format!("{}:Password", user.name).as_bytes()).expect("Failed to set password for user");
+            busybox_with_stdin("chpasswd", &["-c", "sha512"], format!("{}:Password", user.name).as_bytes()).context("Failed to set password for user")?;
         }
         _ => ()
     }
+    Ok(())
 }
 
-fn handle_noninteractive_user(user: &mut User) {
+fn handle_noninteractive_user(user: &mut User) -> anyhow::Result<()> {
     user.is_locked = true;
-    busybox("passwd", &["-l", &*user.name]).expect("Failed to lock user");
+    busybox("passwd", &["-l", &*user.name]).context("Failed to lock user")?;
+    Ok(())
 }
 
-fn handle_admin_user(user: &mut User) {
+fn handle_admin_user(user: &mut User) -> anyhow::Result<()> {
     println!("{}", format!("User `{}` is in sudo group", user.name).red());
-    let answer = Select::new("Choose an option: ", MANAGE_SUDO_OPTIONS.to_vec()).prompt().unwrap();
+    let answer = Select::new("Choose an option: ", MANAGE_SUDO_OPTIONS.to_vec()).prompt().context("Failed to get user selection")?;
     match answer {
         "Leave in sudo" => (),
         "Remove from sudo" => {
             user.groups.retain(|group| group != &"sudo".to_string());
-            busybox("delgroup", &[&*user.name, "sudo"]).expect("Failed to remove user from sudo group");
+            busybox("delgroup", &[&*user.name, "sudo"]).context("Failed to remove user from sudo group")?;
         },
         _ => ()
     }
+    Ok(())
 }
 
-pub fn users() {
-    let mut users = get_users();
+
+fn make_noninteractive(user: &mut User) -> anyhow::Result<()> {
+    print!("Making non-interactive");
+
+}
+
+pub fn users() -> anyhow::Result<()> {
+    let mut users = get_users()?;
+
+    let allowed_users = fs::read_to_string("users.txt")?.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
+    let allowed_admins = fs::read_to_string("admins.txt")?.split('\n').filter(|s| !s.is_empty()).collect::<Vec<_>>();
 
     for user in &mut users {
-        println!("\n{} {}", "User:".yellow(), user.name);
+        print!("\n{} {}", "User:".yellow(), user.name);
+
+        if (user.uid < 1000) {
+            handle_
+        }
+
         if !NONINTERACTIVE_SHELLS.contains(&user.shell.as_str()) {
-            handle_interactive_user(user);
+            handle_interactive_user(user)?;
             if user.deleted { continue };
         }
 
         if NONINTERACTIVE_SHELLS.contains(&user.shell.as_str()) && !user.is_locked {
-            handle_noninteractive_user(user);
+            handle_noninteractive_user(user)?;
         }
 
         if user.groups.contains(&"sudo".to_string()) {
-            handle_admin_user(user);
+            handle_admin_user(user)?;
         }
 
         let home_directory = Path::new(&user.home_directory);
         if home_directory.exists() {
-            crate::files::print_directory(&home_directory.join(".ssh"), vec!["authorized_keys", "environment", "rc"]);
+            crate::files::print_directory(&home_directory.join(".ssh"), vec!["authorized_keys", "environment", "rc"])?;
         }
     }
+    Ok(())
 }

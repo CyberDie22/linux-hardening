@@ -1,12 +1,13 @@
 use std::collections::HashMap;
+use anyhow::Context;
 use procfs::process::FDTarget;
 
-pub fn network_connections() {
+pub fn network_connections() -> anyhow::Result<()> {
     println!();
-    let tcp = procfs::net::tcp().unwrap();
-    let tcp6 = procfs::net::tcp6().unwrap();
-    let udp = procfs::net::udp().unwrap();
-    let udp6 = procfs::net::udp6().unwrap();
+    let tcp = procfs::net::tcp().context("Failed to read TCP connections")?;
+    let tcp6 = procfs::net::tcp6().context("Failed to read TCP6 connections")?;
+    let udp = procfs::net::udp().context("Failed to read UDP connections")?;
+    let udp6 = procfs::net::udp6().context("Failed to read UDP6 connections")?;
 
     let mut connections: Vec<(String, String, String, String, u64)> = Vec::new();
 
@@ -27,12 +28,12 @@ pub fn network_connections() {
         connections.push((local_address, remote_address, state, format!("{}/udp", protocol), inode))
     }
 
-    let processes = procfs::process::all_processes().unwrap();
+    let processes = procfs::process::all_processes().context("Failed to enumerate processes")?;
     let mut process_map = HashMap::new();
     for process in processes {
-        let process = process.unwrap();
-        let fds = process.fd().unwrap();
-        let stat = process.stat().unwrap();
+        let Ok(process) = process else { continue };
+        let Ok(fds) = process.fd() else { continue };
+        let Ok(stat) = process.stat() else { continue };
         for fd in fds {
             if let Ok(fd) = fd {
                 if let FDTarget::Socket(inode) = fd.target {
@@ -53,4 +54,5 @@ pub fn network_connections() {
         }
     }
     println!();
+    Ok(())
 }

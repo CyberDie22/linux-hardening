@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use crate::files::PrintName;
 use crate::packages::{verify_package, Package};
+use owo_colors::OwoColorize;
 
 pub mod files;
 mod users;
@@ -35,56 +36,61 @@ const LINPEAS_SH: &'static str = include_str!("../tools/linpeas.sh");
 const LYNIS_TAR: &'static [u8] = include_bytes!("../tools/lynis-3.1.6.tar.gz");
 const LOKIRS_TAR: &'static [u8] = include_bytes!("../tools/Loki-RS/build/loki-rs.tar.gz");
 
-fn main() {
+fn main() -> anyhow::Result<()> {
     // TODO: output to log file
     // TODO: Disable networking
     // TODO: Backup entire system
 
     // TODO: automate based on good user list
-    // users::users();
+    users::users()?;
 
-    // files::print_file("/etc/sudoers", PrintName::Full, 0, true);
-    // files::print_directory("/etc/sudoers.d", vec![]);
+    // files::print_file("/etc/sudoers", PrintName::Full, 0, true)?;
+    // files::print_directory("/etc/sudoers.d", vec![])?;
     //
-    // files::print_directory("/var/spool/cron/crontabs", vec![]);
-    // files::print_file("/etc/crontab", PrintName::Full, 0, true);
-    // files::print_directory("/etc/cron.hourly", vec![]);
-    // files::print_directory("/etc/cron.daily", vec![]);
-    // files::print_directory("/etc/cron.weekly", vec![]);
-    // files::print_directory("/etc/cron.monthly", vec![]);
-    // files::print_directory("/etc/cron.d", vec![]);
-    // files::print_file("/etc/anacrontab", PrintName::Full, 0, true);
-    //
-    // files::print_directory("/etc/init.d", vec![]);
+    // files::print_directory("/var/spool/cron/crontabs", vec![])?;
+    // files::print_file("/etc/crontab", PrintName::Full, 0, true)?;
+    // files::print_directory("/etc/cron.hourly", vec![])?;
+    // files::print_directory("/etc/cron.daily", vec![])?;
+    // files::print_directory("/etc/cron.weekly", vec![])?;
+    // files::print_directory("/etc/cron.monthly", vec![])?;
+    // files::print_directory("/etc/cron.d", vec![])?;
+    // files::print_file("/etc/anacrontab", PrintName::Full, 0, true)?;
 
-    // println!("\nPackages:");
-    // let packages = packages::get_packages();
-    // for package in packages { // TODO: write this to a file
-    //     let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
-    //     let (failed_files, missed_files) = verify_package(&package).unwrap_or((vec![], vec![]));
-    //     println!("{}: {} failed, {} missed", package.name, failed_files.len(), missed_files.len());
-    //     for file in failed_files {
-    //         println!("  {}: FAILED", file);
-    //     }
-    // }
+    // files::print_directory("/etc/init.d", vec![])?;
+
+    println!("\nPackages:");
+    let packages = packages::get_packages()?;
+    for package in packages { // TODO: write this to a file
+        let hashes = package.files.iter().map(|(file, hash)| format!("{};{}", file, hash)).collect::<Vec<String>>().join("|");
+        let (failed_files, missed_files) = verify_package(&package)?.unwrap_or((vec![], vec![]));
+        let message = format!(" {} failed, {} missed", failed_files.len(), missed_files.len());
+        if failed_files.is_empty() {
+            println!("{}", message.green());
+        } else {
+            println!("{}", message.red());
+        }
+        for file in failed_files {
+            println!("  {}: FAILED", file);
+        }
+    }
 
     // TODO: verify packages
     // TODO: support rpms
 
     // TODO: important file permissions
 
-    // processes::check();
+    // processes::check()?;
 
-    // networking::network_connections();
+    // networking::network_connections()?;
 
     // TODO: check installed packages
 
     // TODO: configure firewall
 
-    // shellscript::run_script("linpeas.sh", LINPEAS_SH, &[]).unwrap();
-    // shellscript::run_script_tar("lynis", "lynis/lynis", LYNIS_TAR, &["audit", "system"], true).unwrap();
+    shellscript::run_script("linpeas.sh", LINPEAS_SH, &[])?;
+    shellscript::run_script_tar("lynis", "lynis/lynis", LYNIS_TAR, &["audit", "system"], true)?;
 
-    // shellscript::run_script_tar("loki", "loki", LOKIRS_TAR, &[], false).unwrap();  // TODO: not sure about this
+    // shellscript::run_script_tar("loki", "loki", LOKIRS_TAR, &[], false)?;  // TODO: not sure about this
 
     // TODO: STIG scripts https://www.cyber.mil/stigs/downloads/
     // TODO: Maldetect + ClamAV https://docs.clamav.net/ https://www.rfxn.com/projects/linux-malware-detect/
@@ -92,5 +98,7 @@ fn main() {
     // TODO: rkhunter
 
     // TODO: enable networking
+
+    Ok(())
 }
 
