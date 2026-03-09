@@ -2,7 +2,7 @@ use std::fs;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use inquire::Select;
 use owo_colors::OwoColorize;
 use crate::busybox::{busybox, busybox_with_stdin};
@@ -25,10 +25,10 @@ fn get_users() -> anyhow::Result<Vec<User>> {
         let line = line.context("Failed to read line from /etc/passwd")?;
         let parts: Vec<&str> = line.split(':').collect();
         let user = User {
-            name: parts[0].to_string(),
-            uid: parts[2].parse().context("Failed to parse UID")?,
-            home_directory: parts[5].to_string(),
-            shell: parts[6].to_string(),
+            name: parts.get(0).ok_or(anyhow!("Name field missing from line: {}", line))?.to_string(),
+            uid: parts.get(2).ok_or(anyhow!("UID field missing from line: {}", line))?.parse().context("Failed to parse UID")?,
+            home_directory: parts.get(5).ok_or(anyhow!("Home directory field missing from line: {}", line))?.to_string(),
+            shell: parts.get(6).ok_or(anyhow!("Shell field missing from line: {}", line))?.to_string(),
             is_locked: false,
             groups: Vec::new(),
             deleted: false,
@@ -41,9 +41,10 @@ fn get_users() -> anyhow::Result<Vec<User>> {
     for line in BufReader::new(shadow).lines() {
         let line = line.context("Failed to read line from /etc/shadow")?;
         let parts: Vec<&str> = line.split(':').collect();
-        if parts[0] == "root" { continue };
+        if *parts.get(0).ok_or(anyhow!("Name field missing from line: {}", line))? == "root" { continue };
         if let Some(user) = users.iter_mut().find(|user| user.name == parts[0]) {
-            user.is_locked = parts[1].starts_with('*') || parts[1].starts_with('!');
+            let password = parts.get(1).ok_or(anyhow!("Password field missing from line: {}", line))?;
+            user.is_locked = password.starts_with('*') || password.starts_with('!');
         }
     }
 
@@ -51,7 +52,7 @@ fn get_users() -> anyhow::Result<Vec<User>> {
     for line in BufReader::new(groups).lines() {
         let line = line.context("Failed to read line from /etc/group")?;
         let parts: Vec<&str> = line.split(':').collect();
-        for username in parts[3].split(',').filter(|s| !s.is_empty()) {
+        for username in parts.get(3).ok_or(anyhow!("Group members field missing from line: {}", line))?.split(',').filter(|s| !s.is_empty()) {
             if let Some(user) = users.iter_mut().find(|user| user.name == username) {
                 user.groups.push(parts[0].to_string());
             }
