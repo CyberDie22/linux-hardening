@@ -15,7 +15,7 @@ mod busybox;
 mod shellscript;
 // TODO: https://www.cisecurity.org/cis-benchmarks/
 
-const CRACKLIB_PACKAGE: &str = include_str!("../cracklib-runtime.txt");
+// const CRACKLIB_PACKAGE: &str = include_str!("../cracklib-runtime.txt");
 // fn main() {
 //     let package_text = CRACKLIB_PACKAGE.trim();
 //     let package_parts = package_text.splitn(3, ':').collect::<Vec<&str>>();
