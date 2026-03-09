@@ -87,9 +87,10 @@ pub fn users() -> anyhow::Result<()> {
             make_noninteractive(user)?;
         }
 
-        if user.groups.contains(&"sudo".to_string()) && !allowed_admins.contains(&user.name.as_str()) {
+        if (user.groups.contains(&"sudo".to_string()) || user.groups.contains(&"wheel".to_string())) && !allowed_admins.contains(&user.name.as_str()) {
             user.groups.retain(|group| group != &"sudo".to_string());
             busybox("delgroup", &[&*user.name, "sudo"]).context("Failed to remove user from sudo group")?;
+            busybox("delgroup", &[&*user.name, "wheel"]).context("Failed to remove user from wheel group")?;
         }
 
         if !allowed_users.contains(&user.name.as_str()) {
